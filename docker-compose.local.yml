@@ -7,13 +7,17 @@
 services:
   auth-service:
     build: ./auth-service
+    restart: on-failure   # espera a que Postgres termine de iniciar
   eventos-service:
     build: ./eventos-service
+    restart: on-failure   # espera a que Postgres termine de iniciar
   tickets-service:
     build: ./tickets-service
+    restart: on-failure   # espera a que Postgres termine de iniciar
 
   ordenes-service:
     build: ./ordenes-service
+    restart: on-failure
     environment:
       SQS_ENDPOINT: http://elasticmq:9324
       SQS_QUEUE_URL: http://elasticmq:9324/000000000000/ordenes-emision
