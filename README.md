@@ -91,3 +91,87 @@ Puertos que deben estar abiertos entre nodos: `2377/tcp`, `7946/tcp+udp` y `4789
 
 Equivale a `docker service scale eventpass_ordenes-service=5`. Los servicios son *stateless* (el
 estado vive en PostgreSQL y en la cola), por lo que escalan sin cambios de código.
+
+## Endpoints principales
+
+| Método y ruta | Rol | Descripción |
+|---|---|---|
+| `POST /auth/registro` | público | Registra un comprador |
+| `POST /auth/login` | público | Devuelve el JWT |
+| `GET /eventos` · `GET /eventos/{id}` | COMPRADOR, STAFF | Eventos y aforo disponible |
+| `POST /eventos` | STAFF | Crea un evento |
+| `POST /ordenes` | COMPRADOR | Acepta la compra → `202` `PENDIENTE_EMISION` |
+| `GET /ordenes/{id}` · `GET /ordenes/mis-ordenes` | COMPRADOR | Estado de la orden (`EMITIDA` / `RECHAZADA`) |
+| `GET /tickets/mis-tickets` | COMPRADOR | Códigos de acceso emitidos |
+| `POST /tickets/validar` | STAFF | Valida un código en puerta (uso único) |
+
+Rutas `/internal/**`: solo para la función Lambda (`X-Internal-Key`); no se publican en el API Gateway.
+Colección de Postman lista para importar en `docs/postman/`.
+
+## Función serverless (FaaS) - IE10
+
+`lambda-emision/` contiene la función `EmisionTicketsHandler` (Java 21), disparada por la cola SQS.
+Ver el diseño completo en [`docs/arquitectura.md`](docs/arquitectura.md).
+
+```bash
+# Pruebas unitarias de la función (sin red, con servicios simulados)
+cd lambda-emision && mvn test
+
+# Ejecutarla en local contra ElasticMQ (ya incluida en docker-compose.local.yml)
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
+
+# Desplegarla en AWS (SQS + Lambda + trigger + API Gateway)
+export ARTIFACT_BUCKET=eventpass-artefactos-<tu-sufijo-unico> BACKEND_HOST=<IP-o-DNS-del-manager> \
+       GATEWAY_KEY=<16+ caracteres> INTERNAL_API_KEY=<16+ caracteres>
+./scripts/aws-provision.sh
+
+# Probarla en AWS enviando un mensaje a la cola (la orden debe existir) o con el flujo completo:
+API_URL=https://<id>.execute-api.<region>.amazonaws.com ./scripts/e2e-test.sh
+```
+
+Variables de entorno de la Lambda: `EVENTOS_URL`, `ORDENES_URL`, `TICKETS_URL`, `INTERNAL_API_KEY`
+(las define la plantilla `infra/cloudformation.yml`).
+
+## Pipeline CI/CD - IE4 / IE5 / IE6
+
+`.github/workflows/ci-cd.yml` (se ejecuta en cada push a `main`):
+
+1. **test**: `mvn verify` en los 4 microservicios y la Lambda.
+2. **docker**: construye y publica las imágenes en GitHub Container Registry (`ghcr.io`).
+3. **provision-cloud**: `scripts/aws-provision.sh` crea/actualiza la cola SQS (+DLQ), la Lambda con su
+   trigger y el API Gateway mediante CloudFormation (infraestructura como código).
+4. **deploy**: `docker stack deploy` contra el manager del Swarm por SSH.
+5. **smoke-test**: ejecuta `scripts/e2e-test.sh` a través del API Gateway.
+
+### Secretos y variables necesarios (Settings → Secrets and variables → Actions)
+
+| Nombre | Para qué |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Credenciales AWS (el token solo si usas AWS Academy) |
+| `ARTIFACT_BUCKET` | Bucket S3 (nombre único global) para el `.jar` de la Lambda |
+| `LAMBDA_ROLE_ARN` | (Opcional) rol existente, p. ej. `LabRole` en AWS Academy |
+| `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY` | Nodo manager del Swarm y llave SSH privada |
+| `JWT_SECRET`, `INTERNAL_API_KEY`, `GATEWAY_KEY` | Secretos de la aplicación (≥ 32 / 16 / 16 caracteres) |
+| `DB_PASSWORD`, `SEED_COMPRADOR_PASSWORD`, `SEED_STAFF_PASSWORD` | Base de datos y usuarios demo |
+| `GHCR_PAT` | (Opcional) token con `read:packages` si los paquetes de GHCR son privados |
+| Variable `AWS_REGION` | (Opcional) por defecto `us-east-1` |
+
+> Los secretos **nunca** se escriben en el repositorio (`.env` está en `.gitignore`).
+
+## Pruebas
+
+```bash
+(cd auth-service    && mvn test)
+(cd eventos-service && mvn test)
+(cd ordenes-service && mvn test)
+(cd tickets-service && mvn test)
+(cd lambda-emision  && mvn test)
+./scripts/e2e-test.sh        # sistema completo levantado (local o nube)
+```
+
+## Documentación
+
+* [`docs/arquitectura.md`](docs/arquitectura.md) - diagramas y garantías de consistencia
+* [`docs/decisiones-swarm.md`](docs/decisiones-swarm.md) - argumentación técnica del clúster (IE9)
+* [`docs/guion-video.md`](docs/guion-video.md) - guion de la presentación en video (IE2-IE17)
+* [`docs/pendientes-companera.md`](docs/pendientes-companera.md) - lo que falta hacer manualmente
