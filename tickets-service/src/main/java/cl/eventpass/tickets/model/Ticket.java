@@ -15,9 +15,9 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "tickets",
-        indexes = @Index(name = "idx_tickets_comprador", columnList = "compradorId"),
+        indexes = @Index(name = "idx_tickets_comprador", columnList = "comprador_id"),
         // (ordenId, numero) unico: emitir dos veces la misma orden nunca duplica tickets
-        uniqueConstraints = @UniqueConstraint(name = "uq_ticket_orden_numero", columnNames = {"ordenId", "numero"}))
+        uniqueConstraints = @UniqueConstraint(name = "uq_ticket_orden_numero", columnNames = {"orden_id", "numero"}))
 public class Ticket {
 
     @Id
@@ -27,7 +27,7 @@ public class Ticket {
     @Column(nullable = false, unique = true, length = 32)
     private String codigo;
 
-    @Column(nullable = false, length = 64)
+    @Column(name = "orden_id", nullable = false, length = 64)
     private String ordenId;
 
     @Column(nullable = false)
@@ -36,7 +36,7 @@ public class Ticket {
     @Column(nullable = false)
     private Long eventoId;
 
-    @Column(nullable = false)
+    @Column(name = "comprador_id", nullable = false)
     private String compradorId;
 
     @Enumerated(EnumType.STRING)
